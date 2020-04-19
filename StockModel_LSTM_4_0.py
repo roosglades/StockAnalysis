@@ -28,13 +28,13 @@ import matplotlib.pyplot as plt
 
 #%% Todo
 
-# TODO: make ARIMA an input to the model
+# // TODO: make ARIMA an input to the model
 # // TODO: grab 1year of data before training data
 # // TODO: make that year = history
 # // TODO: then create series of data for ARIMA's prediction for the rest of the NN's set (test/train)
-# TODO: feature reduction using XGBOOST
-# TODO: try to predict close_norm, have a feeling it will be no good and will need to switch to close
-#TODO: will need to interpret ARIMA model because it will be be normalized 
+# // TODO: feature reduction using XGBOOST
+# // TODO: try to predict close_norm, have a feeling it will be no good and will need to switch to close
+# // TODO: will need to interpret ARIMA model because it will be be normalized 
 # TODO: can also possibly add 2 day prediction as an input
 # TODO: go from 1 day to 5 day prediction
 # TODO: add in twitter/google data as parm
@@ -79,7 +79,7 @@ ARIMA_Predict   = 'close_norm'
 Plots = 'D:/StockAnalytics/LSTM4_Results'
 
 # model parms
-test_split = 0.25 # train/test split
+test_split = 0.10 # train/test split
 #BatchSize  = 8 # number of samples to update weights
 BatchSizes  = list(range(8, 32, 8))
 #TimeStep  = 50 # 2 months used in LSTM model
@@ -216,7 +216,6 @@ print('Dataset ready.')
 
 print('Splitting Data...')
 data_prep   = data.drop(['Day','Date'],axis=1)
-target_var  = data_prep.columns.get_loc(Predict)
 train, test = train_test_split(data_prep, shuffle = False, test_size=test_split)
 
 #%% XGBOOST Select Feature Importance
@@ -240,8 +239,9 @@ plt.savefig(fname)
 
 print('XGBoost Complete')
 
-train = train.loc[:,train.columns != Predict + '_T+1']
-test  = train.loc[:,train.columns != Predict + '_T+1']
+train       = train.loc[:,train.columns != Predict + '_T+1']
+test        = train.loc[:,train.columns != Predict + '_T+1']
+target_var  = train.columns.get_loc(Predict)
 
 print('Scaling Data...')
 scaler = MinMaxScaler()
@@ -268,7 +268,7 @@ for i in range(0,len(BatchSizes)):
     for j in range(0,len(TimeSteps)):
         TimeStep = TimeSteps[j]
         for m in range(0,len(Nodes)):
-                Node = Nodes[m]
+            Node = Nodes[m]
 
             # Create sequences of time steps for each y prediction
 
@@ -319,7 +319,7 @@ for i in range(0,len(BatchSizes)):
 
             #create test table
             test_outcome = pd.DataFrame(columns=[Predict,'Pred','Actual'])
-            test_outcome[Predict]   = test.iloc[TimeStep:][Predict].values[:]
+            test_outcome[Predict]   = test.iloc[TimeStep-1:-1][Predict].values[:]
             test_outcome['Pred']    = pred_closing
             test_outcome['Actual']  = actual_closing
 
