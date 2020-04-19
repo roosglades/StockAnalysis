@@ -23,12 +23,18 @@ import matplotlib.pyplot as plt
 
 #%% Todo
 
-# TODO: look at SARIMA
+# // TODO: look at SARIMA
+# TODO: try ARIMA with close_norm
 
 #Lessons learned:
 # prediciting on just closing price - ARIMA Results
 # predicting close_norm has no real effect on the outcome - ARIMA Results 2
 # predicting on close_diff - ARIMA Results 3
+# SARIMA doesn't seem to change much
+# close_norm round 2 - ARIMA results 4
+# we pretty much need to predict close_norm, from a scaling, and ARIMA input point of view it just makes sense
+
+
 
 
 #%% functions
@@ -43,29 +49,29 @@ Lookback    = 4 # years
 Predict     = 'close_norm'
 
 # Plot Folder
-Plots = 'D:/StockAnalytics/ARIMA_Results2'
+Plots = 'D:/StockAnalytics/ARIMA_Results5'
 
 # model parms
 test_split = 0.25 # train/test split
 
 #ARIMA order
-p_values = range(0, 3)
-d_values = range(0, 2)
-q_values = range(0, 1)
+# p_values = range(0, 5)
+# d_values = range(0, 2)
+# q_values = range(0, 3)
 
-P_values = range(1, 3)
-Q_values = range(0, 2)
-D_values = range(0, 1)
+# P_values = range(1, 3)
+# Q_values = range(0, 2)
+# D_values = range(0, 1)
 
-m = 12
+#m = 12
 
 # best match
-#p=0
-#d=1
-#q=0
+p=1
+d=0
+q=2
 
 #predict current/past
-current = True
+current = False
 
 # if current=False
 selected_date = '2020-01-01'
@@ -140,97 +146,98 @@ train, test = train_test_split(data, shuffle = False, test_size=test_split)
 ytrain  = train[Predict].values
 ytest   = test[Predict].values
 
-# grid search
-for p in p_values:
-    for d in d_values:
-        for q in q_values:
-            for P in P_values:
-                for D in D_values:
-                    for Q in Q_values:
+# # grid search
+# for p in p_values:
+#     for d in d_values:
+#         for q in q_values:
+# for P in P_values:
+#     for D in D_values:
+#         for Q in Q_values:
 
-                        #%% Model
-                        history = [x for x in ytrain]
-                        predictions = list()
-                        for t in range(len(ytest)):
-                            #model = ARIMA(history, order=(p,d,q))
-                            model = SARIMAX(history, order=(p,d,q), seasonal_order=(P,D,Q,m))
-                            model_fit = model.fit(disp=0)
-                            output = model_fit.forecast()
-                            #yhat = output[0][0]
-                            yhat = output[0]
-                            predictions.append(yhat)
-                            obs = ytest[t]
-                            history.append(obs)
+#%% Model
+history = [x for x in ytrain]
+predictions = list()
+for t in range(len(ytest)):
+    model = ARIMA(history, order=(p,d,q))
+    #model = SARIMAX(history, order=(p,d,q))
+    model_fit = model.fit(disp=0)
+    output = model_fit.forecast()
+    yhat = output[0][0]
+    #yhat = output[0]
+    predictions.append(yhat)
+    obs = ytest[t]
+    history.append(obs)
 
-                        #%% Eval
+#%% Eval
 
-                        if Predict == 'close_norm' or Predict == 'close_diff':
-                            test['PredCloseNorm']   = predictions
-                            test['ObsCloseNorm']    = ytest
+if Predict == 'close_norm' or Predict == 'close_diff':
+    test['PredCloseNorm']   = predictions
+    test['ObsCloseNorm']    = ytest
 
-                            test['ConvPredClose'] = (test['PredCloseNorm']) + test['PrevClose']
-                            test['ConvObsClose']  = (test['ObsCloseNorm']) + test['PrevClose']
+    test['ConvPredClose'] = (test['PredCloseNorm']) + test['PrevClose']
+    test['ConvObsClose']  = (test['ObsCloseNorm']) + test['PrevClose']
 
-                            #convert
-                            predictions = test['ConvPredClose'].values[:]
-                            SwitchPredict = 'Close'
-                        
-                        else:
-                            SwitchPredict = Predict
+    #convert
+    predictions = test['ConvPredClose'].values[:]
+    SwitchPredict = 'Close'
 
-
-                        MasterDF = pd.DataFrame(columns=['Date',SwitchPredict,'Actual/Predicted'])
-
-                        # Test Prediction
-                        test_dates = data['Day'][len(train):]
-                        tempdf = pd.DataFrame({'Date':test_dates,SwitchPredict:predictions,'Actual/Predicted':'Predicted','Test/Train':'Test'})
-                        MasterDF = MasterDF.append(tempdf)
-
-                        # Test Actual
-                        tempdf = pd.DataFrame({'Date':test_dates,SwitchPredict:test[Predict].tolist(),'Actual/Predicted':'Actual','Test/Train':'Test'})
-                        MasterDF = MasterDF.append(tempdf)
+else:
+    SwitchPredict = Predict
 
 
-                        mape = mean_absolute_percentage_error(test[SwitchPredict].tolist(),predictions)
-                        mae  = mean_absolute_error(test[SwitchPredict].tolist(),predictions)
-                        corr, _ = pearsonr(test[SwitchPredict].tolist(), predictions)
+MasterDF = pd.DataFrame(columns=['Date',SwitchPredict,'Actual/Predicted'])
 
-                        # trend matches
-                        test_outcome = pd.DataFrame(columns=['Day',SwitchPredict,'Pred','Actual'])
+# Test Prediction
+test_dates = data['Day'][len(train):]
+tempdf = pd.DataFrame({'Date':test_dates,SwitchPredict:predictions,'Actual/Predicted':'Predicted','Test/Train':'Test'})
+MasterDF = MasterDF.append(tempdf)
 
-                        test_outcome['Day']         = test_dates
-                        test_outcome[SwitchPredict]       = data[SwitchPredict][len(train)-1:-1].values[:]
-                        test_outcome['Pred']        = predictions
-                        test_outcome['Actual']      = test[SwitchPredict].tolist()
+# Test Actual
+tempdf = pd.DataFrame({'Date':test_dates,SwitchPredict:test['Close'].tolist(),'Actual/Predicted':'Actual','Test/Train':'Test'})
+MasterDF = MasterDF.append(tempdf)
 
-                        test_outcome['PredTrend']   = test_outcome['Pred'] - test_outcome[SwitchPredict]
-                        test_outcome['PredTrend'][test_outcome['PredTrend'] <= 0]   = 0
-                        test_outcome['PredTrend'][test_outcome['PredTrend'] > 0]    = 1
-                        test_outcome['ActualTrend'] = test_outcome['Actual'] - test_outcome[SwitchPredict]
-                        test_outcome['ActualTrend'][test_outcome['ActualTrend'] <= 0]   = 0
-                        test_outcome['ActualTrend'][test_outcome['ActualTrend'] > 0]    = 1
 
-                        test_outcome['Match'] = np.nan
-                        test_outcome['Match'][test_outcome['ActualTrend'] == test_outcome['PredTrend']] = 1 
-                        test_outcome['Match'][test_outcome['ActualTrend'] != test_outcome['PredTrend']] = 0
-                        trend_match = test_outcome['Match'].sum()/test_outcome.shape[0]*100 
+mape = mean_absolute_percentage_error(test[SwitchPredict].tolist(),predictions)
+mae  = mean_absolute_error(test[SwitchPredict].tolist(),predictions)
+corr, _ = pearsonr(test[SwitchPredict].tolist(), predictions)
 
-                        print('MAPE: ' + str(mape))
-                        print('MAE: ' + str(mae))
-                        print('Correlation: ' + str(corr))
-                        print('Prediction Matches: ' + str(trend_match))
+# trend matches
+test_outcome = pd.DataFrame(columns=['Day',SwitchPredict,'Pred','Actual'])
 
-                        if not os.path.exists(Plots):
-                            os.makedirs(Plots)
+test_outcome['Day']         = test_dates
+test_outcome[SwitchPredict]       = data[SwitchPredict][len(train)-1:-1].values[:]
+test_outcome['Pred']        = predictions
+test_outcome['Actual']      = test[SwitchPredict].tolist()
 
-                        print('Plotting...')
-                        palette = sns.color_palette("mako_r", 2)
-                        fig = plt.figure(figsize=(19.20,10.80))
-                        sns.relplot(x="Date", y=SwitchPredict, hue="Actual/Predicted",style="Test/Train", palette=palette, estimator=None, kind="line", data=MasterDF)
-                        fname = Plots + '/' + Stock + '_ARIMA_O'+ str(p) + str(d) + str(q) +'_SO_' + str(P) + str(D) + str(Q) + '_M' + str(trend_match) + '_C' + str(corr) + '_MAE' + str(mae) + '_MAPE' + str(mape) + '.svg'
-                        plt.savefig(fname)
-                        plt.close()
-                        print('Saved Plot: ' + fname)
+test_outcome['PredTrend']   = test_outcome['Pred'] - test_outcome[SwitchPredict]
+test_outcome['PredTrend'][test_outcome['PredTrend'] <= 0]   = 0
+test_outcome['PredTrend'][test_outcome['PredTrend'] > 0]    = 1
+test_outcome['ActualTrend'] = test_outcome['Actual'] - test_outcome[SwitchPredict]
+test_outcome['ActualTrend'][test_outcome['ActualTrend'] <= 0]   = 0
+test_outcome['ActualTrend'][test_outcome['ActualTrend'] > 0]    = 1
+
+test_outcome['Match'] = np.nan
+test_outcome['Match'][test_outcome['ActualTrend'] == test_outcome['PredTrend']] = 1 
+test_outcome['Match'][test_outcome['ActualTrend'] != test_outcome['PredTrend']] = 0
+trend_match = test_outcome['Match'].sum()/test_outcome.shape[0]*100 
+
+print('MAPE: ' + str(mape))
+print('MAE: ' + str(mae))
+print('Correlation: ' + str(corr))
+print('Prediction Matches: ' + str(trend_match))
+
+if not os.path.exists(Plots):
+    os.makedirs(Plots)
+
+print('Plotting...')
+palette = sns.color_palette("mako_r", 2)
+fig = plt.figure(figsize=(19.20,10.80))
+sns.relplot(x="Date", y=SwitchPredict, hue="Actual/Predicted",style="Test/Train", palette=palette, estimator=None, kind="line", data=MasterDF)
+#fname = Plots + '/' + Stock + '_ARIMA_O'+ str(p) + str(d) + str(q) +'_SO_' + str(P) + str(D) + str(Q) + '_M' + str(trend_match) + '_C' + str(corr) + '_MAE' + str(mae) + '_MAPE' + str(mape) + '.svg'
+fname = Plots + '/' + Stock + '_ARIMA_O'+ str(p) + str(d) + str(q) + '_M' + str(trend_match) + '_C' + str(corr) + '_MAE' + str(mae) + '_MAPE' + str(mape) + '.svg'
+plt.savefig(fname)
+plt.close()
+print('Saved Plot: ' + fname)
 
 #%% Post
 
