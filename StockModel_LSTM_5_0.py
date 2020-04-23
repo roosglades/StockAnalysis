@@ -19,7 +19,7 @@ from xgboost import plot_importance
 
 import tensorflow as tf
 from keras.models import Sequential
-from keras.layers import Dense, Dropout, LSTM
+from keras.layers import Activation, Dense, Dropout, LSTM
 from keras.callbacks import EarlyStopping
 
 import seaborn as sns
@@ -27,33 +27,12 @@ sns.set()
 import matplotlib.pyplot as plt
 
 import warnings
-
 warnings.filterwarnings("ignore")
 
 
 #%% Todo
 
-# // TODO: make ARIMA an input to the model
-# // TODO: grab 1year of data before training data
-# // TODO: make that year = history
-# // TODO: then create series of data for ARIMA's prediction for the rest of the NN's set (test/train)
-# // TODO: feature reduction using XGBOOST
-# // TODO: try to predict close_norm, have a feeling it will be no good and will need to switch to close
-# // TODO: will need to interpret ARIMA model because it will be be normalized 
-# // TODO: predict returns not the actual price, can always turn return back into price
-# // TODO: use log return as a feature and to predict that
-# // ! tests indicate that shorter train scale help optimize matching trends
-# // TODO: normalizers/dropout on heavier trained model. maybe we just need to dropout the data more
-# // TODO: Grid search and optimize the ARIMA
-# // TODO: check for seasonality with decompose
-# // TODO: use auto_arima to guess which p,d,q values are best
-# TODO: try m = 7, 12, 52
-# TODO: predict selected dates price
 
-#! next model
-# TODO: add in 5 day ARIMA prediction
-# TODO: go from 1 day to 5 day prediction
-# TODO: add in twitter/google data as parm
 
 #%% functions
 def mean_absolute_percentage_error(y_true, y_pred): 
@@ -85,7 +64,7 @@ def get_technical_indicators(dataset,targetparm):
 #%% User Input
 Stock           = 'AAPL' #ticker
 Predict         = 'close_return_log'
-Lookback        = 15 # years
+Lookback        = 2.5 # years
 
 H               = 1 #forecast horizon in days
 ARIMA_PreTrain  = 1 # pretrain ARIMA in years 
@@ -103,7 +82,7 @@ TimeStep    = 20 # 2 months used in LSTM model
 #TimeSteps  = list(range(10, 90, 10))
 Epoch       = 100 # number of times to run through the data
 #Epochs     = list(range(50,550,50))
-Node        = 256 # number of LSTM Node
+Node        = 128 # number of LSTM Node
 #Nodes      = list(range(16,144,16))
 
 #predict current/past
@@ -194,7 +173,7 @@ for i,row in data.iterrows():
 # delete first row or any rows with nans
 data = data.dropna()
 data = data.reset_index(drop=True)
-data[Predict + '_T+1'] = np.nan
+data['Close' + '_T+1'] = np.nan
 
 for i,row in data.iterrows():
 
@@ -202,7 +181,7 @@ for i,row in data.iterrows():
         # skip the last row
         break
 
-    data.at[i,Predict + '_T+1'] = data.iloc[i+1][Predict]
+    data.at[i,'Close' + '_T+1'] = data.iloc[i+1]['Close']
 
 data = data.dropna()
 data = data.reset_index(drop=True)
@@ -219,6 +198,7 @@ history = [x for x in ARIMApretrain]
 AutoArima = pm.auto_arima(history, seasonal=True, m=12, suppress_warnings=True)
 
 predictions = list()
+obs         = list()
 for t in range(len(ARIMAchase)):
     model = SARIMAX(history, order=AutoArima.order, seasonal_order=AutoArima.seasonal_order)
     #model = ARIMA(history, order=AutoArima.order)
@@ -226,6 +206,7 @@ for t in range(len(ARIMAchase)):
     output = model_fit.forecast(H)
     yhat = output[0]
     predictions.append(yhat)
+    obs.append(ARIMAchase.iloc[t])
     history.append(ARIMAchase.iloc[t])
 
 # data that has the ARIMA pre train removed from it
@@ -234,10 +215,14 @@ data = data.iloc[ARIMA_PreTrain*253:]
 #place ARIMA output back in data
 data['ARIMAGuess_' + ARIMA_Predict] = predictions
 
+arima_mae = mean_absolute_error(obs,predictions)
+
+print('ARIMA MAE: ' + str(arima_mae))
+
 print('ARIMA model completed.')
 
 print('Get technical indicators...')
-data = get_technical_indicators(data,Predict)
+data = get_technical_indicators(data,'Close')
 data = data.dropna()
 data = data.reset_index(drop=True)
 
@@ -252,25 +237,29 @@ train, test = train_test_split(data_prep, shuffle = False, test_size=test_split)
 print('XGBOOST getting feature importance....')
 
 # split data into x and y
-xgbtrain = train.loc[:,train.columns != Predict + '_T+1']
-ygbtrain = train.loc[:,Predict + '_T+1']
+xgbtrain = train.loc[:,train.columns != 'Close' + '_T+1']
+ygbtrain = train.loc[:,'Close' + '_T+1']
 
-xgbtest = test.loc[:,train.columns != Predict + '_T+1']
-ygbtest = test.loc[:,Predict + '_T+1']
+xgbtest = test.loc[:,train.columns != 'Close' + '_T+1']
+ygbtest = test.loc[:,'Close' + '_T+1']
 
 # fit model no training data
 model = XGBClassifier()
 model.fit(xgbtrain, ygbtrain)
+ygbguess = model.predict(xgbtest)
+
+xboost_mae = mean_absolute_error(ygbtest[:],ygbguess)
 
 # plot feature importance
-#plot_importance(model)
-#fname = Plots + '/F_Importance.svg'
-#plt.savefig(fname)
+plot_importance(model)
+fname = Plots + '/F_Importance.svg'
+plt.savefig(fname)
 
+print('XGBoost MAE: ' + str(xboost_mae))
 print('XGBoost Complete')
 
-train       = train.loc[:,train.columns != Predict + '_T+1']
-test        = test.loc[:,test.columns != Predict + '_T+1']
+train       = train.loc[:,train.columns != 'Close' + '_T+1']
+test        = test.loc[:,test.columns != 'Close' + '_T+1']
 target_var  = train.columns.get_loc(Predict)
 
 print('Scaling Data...')
@@ -316,92 +305,154 @@ x_test, y_test = np.array(x_test), np.array(y_test)
 
 dim_size = x_train.shape[2]
 
-print('Creating Model...')
-model = Sequential()
-model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size), recurrent_dropout=0.2))
-model.add(LSTM(units = int(Node/8), return_sequences=True))
-model.add(LSTM(units = int(Node/6)))
-model.add(Dense(1))
+for mod in range(0,8):
+
+    if mod == 0:
+        print('Creating Model...')
+        model = Sequential()
+        model.add(LSTM(units = Node, input_shape=(TimeStep,dim_size)))
+        model.add(Dense(1))
+    
+    elif mod == 1:
+        print('Creating Model...')
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size)))
+        model.add(LSTM(units = int(Node/2)))
+        model.add(Dense(1))
+    
+    elif mod == 2:
+        print('Creating Model...')
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size)))
+        model.add(LSTM(units = int(Node/2)))
+        model.add(Dense(1))
+    
+    elif mod == 3:
+        print('Creating Model...')
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size)))
+        model.add(LSTM(units = int(Node*2), return_sequences=True))
+        model.add(LSTM(units = int(Node/2)))
+        model.add(Dense(1))
+
+    elif mod == 4:
+        print('Creating Model...')
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size)))
+        model.add(LSTM(units = int(Node*2), return_sequences=True))
+        model.add(LSTM(units = int(Node/2), return_sequences=True))
+        model.add(LSTM(units = int(Node/4)))
+        model.add(Dense(1))
+
+    elif mod == 5:
+        print('Creating Model...')
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size), recurrent_dropout = 0.2))
+        model.add(LSTM(units = int(Node*2), return_sequences=True))
+        model.add(LSTM(units = int(Node/2), return_sequences=True))
+        model.add(LSTM(units = int(Node/4)))
+        model.add(Dense(1))
+
+    elif mod == 6:
+
+        print('Creating Model...')
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size), recurrent_dropout=0.2))
+        model.add(LSTM(units = int(Node/8), return_sequences=True))
+        model.add(LSTM(units = int(Node/6)))
+        model.add(Dense(1))
+
+    elif mod == 7:
+
+        print('Creating Model...')
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size), recurrent_dropout=0.2))
+        model.add(Activation('relu'))
+        model.add(LSTM(units = int(Node/8), return_sequences=True))
+        model.add(Activation('relu'))
+        model.add(LSTM(units = int(Node/6)))
+        model.add(Activation('linear'))
+        model.add(Dense(1))
 
 
-print('Model Created.')
-model.compile(loss='mean_absolute_error', optimizer='adam')
+    print('Model Created.')
+    model.compile(loss='mean_absolute_error', optimizer='adam')
 
-print('Fitting Model..')
-model.fit(x_train, y_train, epochs=Epoch, batch_size=BatchSize, verbose=2,
-            callbacks=[EarlyStopping(monitor='val_loss', patience=2, verbose=0, mode='auto',
-            restore_best_weights=True)])
+    print('Fitting Model..')
+    model.fit(x_train, y_train, epochs=Epoch, batch_size=BatchSize, verbose=2,
+                callbacks=[EarlyStopping(monitor='val_loss', patience=2, verbose=0, mode='auto',
+                restore_best_weights=True)])
 
-#%% Model Eval
-print('Model Testing..')
-#test set
-pred_closing      = model.predict(x_test)
-pred_closing      = np.concatenate((pred_closing[:,:]))
+    #%% Model Eval
+    print('Model Testing..')
+    #test set
+    pred_closing      = model.predict(x_test)
+    pred_closing      = np.concatenate((pred_closing[:,:]))
 
-#unscale parms
-pred_closing      = pred_closing*(target_max - target_min) + target_min
-actual_closing    = y_test*(target_max - target_min) + target_min
+    #unscale parms
+    pred_closing      = pred_closing*(target_max - target_min) + target_min
+    actual_closing    = y_test*(target_max - target_min) + target_min
 
-#create test table
-test_outcome = pd.DataFrame(columns=[Predict,'PredReturn','ActualReturn','PredClose','ActualClose'])
-test_outcome[Predict]           = test.iloc[TimeStep-1:-1][Predict].values[:]
-test_outcome['Close']           = test.iloc[TimeStep-1:-1]['Close'].values[:]
-test_outcome['PredReturn']      = pred_closing
-test_outcome['ActualReturn']    = actual_closing
-test_outcome['PredClose']       = np.e**test_outcome['PredReturn'] * test_outcome['Close']
-test_outcome['ActualClose']     = np.e**test_outcome['ActualReturn'] * test_outcome['Close']
+    #create test table
+    test_outcome = pd.DataFrame(columns=[Predict,'Close','PredReturn','ActualReturn','PredClose','ActualClose'])
+    test_outcome[Predict]           = test.iloc[TimeStep-1:-1][Predict].values[:]
+    test_outcome['Close']           = test.iloc[TimeStep-1:-1]['Close'].values[:]
+    test_outcome['PredReturn']      = pred_closing
+    test_outcome['ActualReturn']    = actual_closing
+    test_outcome['PredClose']       = np.e**test_outcome['PredReturn'] * test_outcome['Close']
+    test_outcome['ActualClose']     = np.e**test_outcome['ActualReturn'] * test_outcome['Close']
 
-test_outcome['PredTrend']                                       = test_outcome['PredClose'] - test_outcome['Close']
-test_outcome['PredTrend'][test_outcome['PredTrend'] <= 0]       = 0
-test_outcome['PredTrend'][test_outcome['PredTrend'] > 0]        = 1
-test_outcome['ActualTrend']                                     = test_outcome['ActualClose'] - test_outcome['Close']
-test_outcome['ActualTrend'][test_outcome['ActualTrend'] <= 0]   = 0
-test_outcome['ActualTrend'][test_outcome['ActualTrend'] > 0]    = 1
+    test_outcome['PredTrend']                                       = test_outcome['PredClose'] - test_outcome['Close']
+    test_outcome['PredTrend'][test_outcome['PredTrend'] <= 0]       = 0
+    test_outcome['PredTrend'][test_outcome['PredTrend'] > 0]        = 1
+    test_outcome['ActualTrend']                                     = test_outcome['ActualClose'] - test_outcome['Close']
+    test_outcome['ActualTrend'][test_outcome['ActualTrend'] <= 0]   = 0
+    test_outcome['ActualTrend'][test_outcome['ActualTrend'] > 0]    = 1
 
-test_outcome['Match'] = np.nan
-test_outcome['Match'][test_outcome['ActualTrend'] == test_outcome['PredTrend']] = 1 
-test_outcome['Match'][test_outcome['ActualTrend'] != test_outcome['PredTrend']] = 0
-trend_match = test_outcome['Match'].sum()/test_outcome.shape[0]*100 
+    test_outcome['Match'] = np.nan
+    test_outcome['Match'][test_outcome['ActualTrend'] == test_outcome['PredTrend']] = 1 
+    test_outcome['Match'][test_outcome['ActualTrend'] != test_outcome['PredTrend']] = 0
+    trend_match = test_outcome['Match'].sum()/test_outcome.shape[0]*100 
 
-mape = mean_absolute_percentage_error(test_outcome['ActualClose'].values[:],test_outcome['PredClose'].values[:])
-mae  = mean_absolute_error(test_outcome['ActualClose'].values[:],test_outcome['PredClose'].values[:])
-corr, _ = pearsonr(test_outcome['ActualClose'].values[:],test_outcome['PredClose'].values[:])
+    mape = mean_absolute_percentage_error(test_outcome['ActualClose'].values[:],test_outcome['PredClose'].values[:])
+    mae  = mean_absolute_error(test_outcome['ActualClose'].values[:],test_outcome['PredClose'].values[:])
+    corr, _ = pearsonr(test_outcome['ActualClose'].values[:],test_outcome['PredClose'].values[:])
 
-print('MAPE: ' + str(mape))
-print('MAE: ' + str(mae))
-print('Correlation: ' + str(corr))
-print('Prediction Matches: ' + str(trend_match))
+    print('MAPE: ' + str(mape))
+    print('MAE: ' + str(mae))
+    print('Correlation: ' + str(corr))
+    print('Prediction Matches: ' + str(trend_match))
 
-fname = Plots + '/test_outcome.csv'
-test_outcome.to_csv(fname)
-print('Saving Test Output: ' + fname)
+    fname = Plots + '/test_outcome.csv'
+    test_outcome.to_csv(fname)
+    print('Saving Test Output: ' + fname)
 
-#%% Results
+    #%% Results
 
-#combine datasets
-MasterDF    = pd.DataFrame(columns=['Closing Price','Actual/Predicted','Test/Train'])
+    #combine datasets
+    MasterDF    = pd.DataFrame(columns=['Closing Price','Actual/Predicted','Test/Train'])
 
-#grab actual test
-tempdf = pd.DataFrame({'Closing Price':test_outcome['ActualClose'].values[:],'Actual/Predicted':'Actual','Test/Train':'Test'})
-MasterDF = MasterDF.append(tempdf)
+    #grab actual test
+    tempdf = pd.DataFrame({'Closing Price':test_outcome['ActualClose'].values[:],'Actual/Predicted':'Actual','Test/Train':'Test'})
+    MasterDF = MasterDF.append(tempdf)
 
-#grab pred test
-tempdf = pd.DataFrame({'Closing Price':test_outcome['PredClose'].values[:],'Actual/Predicted':'Predicted','Test/Train':'Test'})
-MasterDF = MasterDF.append(tempdf)
+    #grab pred test
+    tempdf = pd.DataFrame({'Closing Price':test_outcome['PredClose'].values[:],'Actual/Predicted':'Predicted','Test/Train':'Test'})
+    MasterDF = MasterDF.append(tempdf)
 
-#create index column to use as x axis for plot
-#MasterDF = MasterDF.reset_index(drop=True)
-MasterDF = MasterDF.reset_index(drop=False)
+    #create index column to use as x axis for plot
+    #MasterDF = MasterDF.reset_index(drop=True)
+    MasterDF = MasterDF.reset_index(drop=False)
 
 
-print('Plotting...')
-palette = sns.color_palette("mako_r", 2)
-fig = plt.figure(figsize=(19.20,10.80))
-sns.relplot(x='index', y='Closing Price', hue="Actual/Predicted",style="Test/Train", palette=palette, estimator=None, kind="line", data=MasterDF)
-fname = Plots + '/' + Stock + '_LSTM_B'+ str(BatchSize) + '_T' + str(TimeStep) + '_N' + str(Node) + '_M' + str(trend_match)[:-11] + '_C' + str(corr)[:-12] + '_MAE' + str(mae)[:-12] + '_MAPE' + str(mape)[:-11] + '.svg'
-plt.savefig(fname)
-plt.close()
-print('Saved Plot: ' + fname)
+    print('Plotting...')
+    palette = sns.color_palette("mako_r", 2)
+    fig = plt.figure(figsize=(19.20,10.80))
+    sns.relplot(x='index', y='Closing Price', hue="Actual/Predicted",style="Test/Train", palette=palette, estimator=None, kind="line", data=MasterDF)
+    fname = Plots + '/' + Stock + '_LSTM_B'+ str(BatchSize) + '_T' + str(TimeStep) + '_N' + str(Node) + '_M' + str(trend_match)[:-11] + '_C' + str(corr)[:-12] + '_MAE' + str(mae)[:-12] + '_MAPE' + str(mape)[:-11] + '.svg'
+    plt.savefig(fname)
+    plt.close()
+    print('Saved Plot: ' + fname)
 
 #%% Post
 

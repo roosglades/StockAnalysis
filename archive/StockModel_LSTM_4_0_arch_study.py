@@ -316,22 +316,47 @@ x_test, y_test = np.array(x_test), np.array(y_test)
 
 dim_size = x_train.shape[2]
 
-num_models = 2
-for num_model in range(0,num_models):
+num_models = 8
+for num_model in range(7,num_models):
 
 
     print('Creating Model...')
     # create and fit the LSTM network
     if num_model ==0:
         model = Sequential()
-        model.add(LSTM(units = Node, input_shape=(TimeStep,dim_size), recurrent_dropout=0.1))
+        model.add(LSTM(units = Node, input_shape=(TimeStep,dim_size), recurrent_dropout=0.2))
         model.add(Dense(1))
 
     elif num_model==1:
         model = Sequential()
-        model.add(LSTM(units = Node, input_shape=(TimeStep,dim_size)))
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size), recurrent_dropout=0.2))
+        model.add(LSTM(units = int(Node/8), return_sequences=True))
+        model.add(LSTM(units = int(Node/8), return_sequences=True))
+        model.add(LSTM(units = int(Node/2)))
         model.add(Dense(1))
-
+    
+    elif num_model==2:
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size), recurrent_dropout=0.2))
+        model.add(LSTM(units = int(Node/8), return_sequences=True, recurrent_dropout=0.2))
+        model.add(LSTM(units = int(Node/8), return_sequences=True))
+        model.add(LSTM(units = int(Node/2)))
+        model.add(Dense(1))
+    
+    elif num_model==3:
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size), recurrent_dropout=0.2))
+        model.add(LSTM(units = int(Node/8), return_sequences=True, recurrent_dropout=0.2))
+        model.add(LSTM(units = int(Node/8)))
+        model.add(Dense(1))
+    
+    elif num_model==4:
+        model = Sequential()
+        model.add(LSTM(units = Node, return_sequences=True, input_shape=(TimeStep,dim_size), recurrent_dropout=0.2))
+        model.add(LSTM(units = int(Node/8)))
+        model.add(Dense(1))
+    
+    elif num_model==5:
 
 
 
@@ -420,7 +445,7 @@ for num_model in range(0,num_models):
     palette = sns.color_palette("mako_r", 2)
     fig = plt.figure(figsize=(19.20,10.80))
     sns.relplot(x='index', y='Closing Price', hue="Actual/Predicted",style="Test/Train", palette=palette, estimator=None, kind="line", data=MasterDF)
-    fname = Plots + '/' + Stock + '_Model3_' + str(num_model) + '_LSTM_B'+ str(BatchSize) + '_T' + str(TimeStep) + '_N' + str(Node) + '_M' + str(trend_match) + '_C' + str(corr) + '_MAE' + str(mae) + '_MAPE' + str(mape) + '.svg'
+    fname = Plots + '/' + Stock + '_Model' + str(num_model) + '_LSTM_B'+ str(BatchSize) + '_T' + str(TimeStep) + '_N' + str(Node) + '_M' + str(trend_match) + '_C' + str(corr) + '_MAE' + str(mae) + '_MAPE' + str(mape) + '.svg'
     plt.savefig(fname)
     plt.close()
     print('Saved Plot: ' + fname)
