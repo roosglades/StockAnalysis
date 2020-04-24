@@ -33,35 +33,39 @@ from functions import *
 
 #%% Todo
 
-# // TODO: get ARIMA prediction for 5 day doesn't do shit
-
-# TODO: find optimal nn arch
-# TODO: turn into rolling 5 day predition
-# TODO: LSTM for 5 day prediction
-# // TODO: set ARIMA as an input using only 1 day forecsast
+# // TODO: Data intake: grab index performances, grab currencies, etc
+# TODO: log return transform all of the prices
+# TODO: Keep ARIMA but have it predict the log return
+# TODO: XGBoost to get feature importance, will need to prebuild the y_train y_test sets i think
+# TODO: Scaling: might need to use a differenct scaler, min max might not be the thing
+# TODO: Downselect only the useful features, don't need to keep everything
+# TODO: train on downselected features with shallow model
+# TODO: eval, predictions, etc
+# TODO: if satisfactory, grid search
 
 #%% User Input
 Stock           = 'AAPL' #ticker
-Predict         = 'close_return_log'
+SisterStock1    = 'MSFT'
+SisterStock2    = 'GOOGL'
+Predict         = 'Close_log'
 Lookback        = 4 # years
 
 H               = 5 #forecast horizon in days
-ARIMA_PreTrain  = 1 # pretrain ARIMA in years 
-ARIMA_Predict   = 'Close'
+ARIMA_PreTrain  = 0.5 # pretrain ARIMA in years 
+ARIMA_Predict   = 'Close_log'
 
 # Plot Folder
-Plots = 'D:/StockAnalytics/Forecast5day'
+Plots = 'D:/StockAnalytics/ForecastXday'
 
 # model parms
-ScaleAll    = True
 test_split  = 0.15 # train/test split
 BatchSize   = 8 # number of samples to update weights
-#BatchSizes  = list(range(8, 32, 8))
 TimeStep    = 20 # 2 months used in LSTM model
-#TimeSteps  = list(range(20, 80, 20))
 Epoch       = 100 # number of times to run through the data
-#Epoch = 10
 Node        = 500 # number of LSTM Node
+
+#BatchSizes  = list(range(8, 32, 8))
+#TimeSteps  = list(range(20, 80, 20))
 #Nodes      = list(range(32,352,64))
 
 #predict current/past
@@ -87,70 +91,118 @@ else:
     selected_date_raw = datetime.strptime(selected_date, '%Y-%m-%d')
     Lback_date_raw  = selected_date_raw - timedelta(days=Lookback*365)
 
-arima_start = Lback_date_raw - timedelta(days=round(ARIMA_PreTrain*365))
+arima_start = (Lback_date_raw - timedelta(days=round(ARIMA_PreTrain*365))).strftime("%Y-%m-%d")
 
+# target stock
 data = yf.download(Stock, start=arima_start, end=date_select)
-data['Day'] = list(range(0,data.shape[0]))
 data = data.reset_index()
 data = data.astype({'Volume': 'float64'}) # change datatype to float
+data['Range'] = data['High'] - data['Low']
 
-print('Getting technical indicators...')
-data = get_technical_indicators(data,'Close')
+# sister stocks (2)
+sis1data = yf.download(SisterStock1, start=arima_start, end=date_select)
+sis1data = sis1data.reset_index()
+sis1data = sis1data.astype({'Volume': 'float64'}) # change datatype to float
+sis1data['Range'] = sis1data['High'] - sis1data['Low']
+sis1data = sis1data.add_prefix('sis1_')
 
-data['open_return']         = np.nan
-data['close_return']        = np.nan
-data['high_return']         = np.nan
-data['low_return']          = np.nan
-data['vol_return']          = np.nan
-data['range_return']        = np.nan
-data['open_return_log']     = np.nan
-data['close_return_log']    = np.nan
-data['high_return_log']     = np.nan
-data['low_return_log']      = np.nan
-data['vol_return_log']      = np.nan
-data['range_return_log']    = np.nan
+sis2data = yf.download(SisterStock2, start=arima_start, end=date_select)
+sis2data = sis2data.reset_index()
+sis2data = sis2data.astype({'Volume': 'float64'}) # change datatype to float
+sis2data['Range'] = sis2data['High'] - sis2data['Low']
+sis2data = sis2data.add_prefix('sis2_')
+
+# composite indices
+# powershares etf that tracks nasdaq 100
+comp1data = yf.download('qqq', start=arima_start, end=date_select)
+comp1data = comp1data.reset_index()
+comp1data = comp1data.astype({'Volume': 'float64'}) # change datatype to float
+comp1data['Range'] = comp1data['High'] - comp1data['Low']
+comp1data = comp1data.add_prefix('comp1_')
+
+# tracks the S&P 500
+comp2data = yf.download('spy', start=arima_start, end=date_select)
+comp2data = comp2data.reset_index()
+comp2data = comp2data.astype({'Volume': 'float64'}) # change datatype to float
+comp2data['Range'] = comp2data['High'] - comp2data['Low']
+comp2data = comp2data.add_prefix('comp2_')
+
+# ishares tracking japanase market
+comp3data = yf.download('jpxn', start=arima_start, end=date_select)
+comp3data = comp3data.reset_index()
+comp3data = comp3data.astype({'Volume': 'float64'}) # change datatype to float
+comp3data['Range'] = comp3data['High'] - comp3data['Low']
+comp3data = comp3data.add_prefix('comp3_')
+
+# ishares tracking chinese market
+comp4data = yf.download('ashr', start=arima_start, end=date_select)
+comp4data = comp4data.reset_index()
+comp4data = comp4data.astype({'Volume': 'float64'}) # change datatype to float
+comp4data['Range'] = comp4data['High'] - comp4data['Low']
+comp4data = comp4data.add_prefix('comp4_')
+
+# vanguard tracking european market
+comp5data = yf.download('vgk', start=arima_start, end=date_select)
+comp5data = comp5data.reset_index()
+comp5data = comp5data.astype({'Volume': 'float64'}) # change datatype to float
+comp5data['Range'] = comp5data['High'] - comp5data['Low']
+comp5data = comp5data.add_prefix('comp5_')
+
+# volatility index
+# etf tracking volatility index
+vixdata = yf.download('viix', start=arima_start, end=date_select)
+vixdata = vixdata.reset_index()
+vixdata = vixdata.astype({'Volume': 'float64'}) # change datatype to float
+vixdata['Range'] = vixdata['High'] - vixdata['Low']
+vixdata = vixdata.add_prefix('vix_')
+
+# currency trade rates
+# japan to usdollar 
+jpnusddata = yf.download('fxy', start=arima_start, end=date_select)
+jpnusddata = jpnusddata.reset_index()
+jpnusddata = jpnusddata.astype({'Volume': 'float64'}) # change datatype to float
+jpnusddata['Range'] = jpnusddata['High'] - jpnusddata['Low']
+jpnusddata = jpnusddata.add_prefix('jpnusd_')
+
+#china to usdollar
+chinusddata = yf.download('cyb', start=arima_start, end=date_select)
+chinusddata = chinusddata.reset_index()
+chinusddata = chinusddata.astype({'Volume': 'float64'}) # change datatype to float
+chinusddata['Range'] = chinusddata['High'] - chinusddata['Low']
+chinusddata = chinusddata.add_prefix('chinusd_')
+
+#euro to usdollar
+eurousddata = yf.download('fxe', start=arima_start, end=date_select)
+eurousddata = eurousddata.reset_index()
+eurousddata = eurousddata.astype({'Volume': 'float64'}) # change datatype to float
+eurousddata['Range'] = eurousddata['High'] - eurousddata['Low']
+eurousddata = eurousddata.add_prefix('eurousd_')
+
+#bring it all together
+data = pd.concat([data, sis1data, sis2data, comp1data, 
+                comp2data, comp3data, comp4data, comp5data,
+                vixdata, jpnusddata,chinusddata, eurousddata], axis=1)
+
 data['month']               = np.nan
 data['day_month']           = np.nan
 data['day_week']            = np.nan
 
-print('Creating data parms')
-
 for i,row in data.iterrows():
-
     if not i:
         # skip the first row
         continue
-    
-    # create norm parameters
-    # Let the Close price of the stock for D1 is X1
-    #and that for D2 is X2. Then, close_return for D2 computed as
-    #(X2 - X1)/X1 in terms of percentage. 
-
-    #returns
-    data.at[i,'open_return']    = (data.iloc[i]['Open'] - data.iloc[i-1]['Open'])/data.iloc[i-1]['Open']*100
-    data.at[i,'close_return']   = (data.iloc[i]['Close'] - data.iloc[i-1]['Close'])/data.iloc[i-1]['Close']*100
-    data.at[i,'high_return']    = (data.iloc[i]['High'] - data.iloc[i-1]['High'])/data.iloc[i-1]['High']*100
-    data.at[i,'low_return']     = (data.iloc[i]['Low'] - data.iloc[i-1]['Low'])/data.iloc[i-1]['Low']*100
-    data.at[i,'vol_return']     = (data.iloc[i]['Volume'] - data.iloc[i-1]['Volume'])/data.iloc[i-1]['Volume']*100
-
-    ranged2                     = data.iloc[i]['High'] - data.iloc[i]['Low']
-    ranged1                     = data.iloc[i-1]['High'] - data.iloc[i-1]['Low']
-    data.at[i,'range_return']   = (ranged2 - ranged1)/ranged1*100
-
-    #log returns
-    data.at[i,'open_return_log']        = np.log(data.iloc[i]['Open']) - np.log(data.iloc[i-1]['Open'])
-    data.at[i,'close_return_log']       = np.log(data.iloc[i]['Close']) - np.log(data.iloc[i-1]['Close'])
-    data.at[i,'high_return_log']        = np.log(data.iloc[i]['High']) - np.log(data.iloc[i-1]['High'])
-    data.at[i,'low_return_log']         = np.log(data.iloc[i]['Low']) - np.log(data.iloc[i-1]['Low'])
-    data.at[i,'vol_return_log']         = np.log(data.iloc[i]['Volume']) - np.log(data.iloc[i-1]['Volume'])
-    data.at[i,'range_return_log']       = np.log(ranged2) - np.log(ranged1)
-
     data.at[i,'month']      = row['Date'].month
     data.at[i,'day_month']  = row['Date'].day
     data.at[i,'day_week']   = row['Date'].weekday()
 
-    #used for converting return later on
-    data.at[i,'PreviousClose']       = data.iloc[i-1]['Close']
+print('Creating log return parms...')
+log_list = ['Open','Close','High','Low','Adj Close']
+for c in range(0,len(data.columns)):
+    if data.columns[c].split('_')[-1] in log_list:
+        data = log_return(data,data.columns[c]) 
+
+print('Getting technical indicators...')
+data = get_technical_indicators(data,'Close')
 
 # delete first row or any rows with nans
 data = data.dropna()
@@ -159,52 +211,41 @@ data = data.reset_index(drop=True)
 print('Creating ARIMA model.')
 # separte the arima data from the train/test data arima_history = first year
 ARIMApretrain  = data.iloc[0:round(ARIMA_PreTrain*253)][ARIMA_Predict] # 253 is the number of trading days per year
-ARIMAchase     = data.iloc[round(ARIMA_PreTrain*253)-1:][ARIMA_Predict] #-1 so i can grab the difference and keep the contination
+ARIMAchase     = data.iloc[round(ARIMA_PreTrain*253):][ARIMA_Predict]
 
 # ARIMA model train and output
 history = [x for x in ARIMApretrain]
-chase   = [x for x in ARIMAchase]
-
-history_diff = difference(history).tolist()
-chase_diff   = difference(chase).tolist()
-chase.pop(0)
 
 #auto arima
-AutoArima = pm.auto_arima(history_diff, seasonal=True, m=12, suppress_warnings=True)
+AutoArima = pm.auto_arima(history, seasonal=True, m=12, suppress_warnings=True)
 
-predictions     = list()
-obs             = list()
-raw_predictions = list()
-for t in range(len(chase)):
-    model = SARIMAX(history_diff, order=AutoArima.order, seasonal_order=AutoArima.seasonal_order)
-    #model = ARIMA(history, order=AutoArima.order)
+# ARIMA model train and output
+history = [x for x in ARIMApretrain]
+predictions = list()
+for t in range(len(ARIMAchase)):
+    model = SARIMAX(history, order=AutoArima.order, seasonal_order=AutoArima.seasonal_order)
     model_fit = model.fit(disp=0)
     output = model_fit.forecast()
     yhat = output[0]
-    raw_predictions.append(yhat)
-    predictions.append(inverse_difference(history,yhat))
-    obs.append(chase[t])
-    history.append(chase[t])
-    history_diff.append(chase_diff[t])
-
-arima_metrics = forecast_accuracy(np.array(predictions),np.array(obs))
-arima_mse = mean_squared_error(obs,predictions)
-
-print('ARIMA MAE: ' + str(arima_metrics['mae']))
-print('ARIMA MAPE: ' + str(arima_metrics['mape']))
-print('ARIMA MSE: ' + str(arima_mse))
+    predictions.append(yhat)
+    history.append(ARIMAchase.iloc[t])
 
 # separate data that was used to pretrain ARIMA
 data = data.iloc[round(ARIMA_PreTrain*253):]
 
 #add in ARIMA estimate
-data['ARIMA_PredClose']     = predictions
-data['ARIMA_UnConverted']   = raw_predictions
-
+data['ARIMA_Pred']     = predictions
 print('ARIMA prediction completed.')
 
 data = data.dropna()
 data = data.reset_index(drop=True)
+
+
+
+
+
+
+
 
 print('Dataset ready.')
 #%% Scaling/Splitting

@@ -88,7 +88,9 @@ def get_technical_indicators(dataset,targetparm):
     # Create 7 and 21 days Moving Average
     dataset['ma7'] = dataset[targetparm].rolling(window=7).mean()
     dataset['ma21'] = dataset[targetparm].rolling(window=21).mean()
-    
+    dataset['ma50'] = dataset[targetparm].rolling(window=50).mean()
+    dataset['ma200'] = dataset[targetparm].rolling(window=200).mean()
+
     # Create MACD
     dataset['26ema'] = dataset[targetparm].ewm(span=26, adjust=False).mean()
     dataset['12ema'] = dataset[targetparm].ewm(span=12, adjust=False).mean()
@@ -106,7 +108,10 @@ def get_technical_indicators(dataset,targetparm):
     
     return dataset
 
-
+def log_return(dataset,transform_parm):
+    dataset[transform_parm + '_log'] = np.log(dataset[transform_parm]) - np.log(dataset[transform_parm].shift(1))
+    return dataset
+    
 def ShallowLSTM(HiddenNodes,TimeStep,input_size,output_size):
     model = Sequential()
     model.add(LSTM(units = HiddenNodes, activation='relu', recurrent_dropout=0.2, input_shape=(TimeStep,input_size)))
