@@ -7,7 +7,7 @@ import yfinance as yf
 from datetime import datetime, timedelta
 
 import pmdarima as pm
-from sklearn.preprocessing import MinMaxScaler
+from sklearn.preprocessing import MinMaxScaler, StandardScaler
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error
 from scipy.stats import pearsonr, linregress
@@ -16,6 +16,8 @@ from statsmodels.tsa.arima_model import ARIMA
 from statsmodels.tsa.statespace.sarimax import SARIMAX
 from xgboost import XGBClassifier
 from xgboost import plot_importance
+from sklearn.metrics import accuracy_score
+from sklearn.feature_selection import SelectFromModel
 
 import tensorflow as tf
 from keras.models import Sequential
@@ -31,15 +33,24 @@ warnings.filterwarnings("ignore")
 
 from functions import *
 
+class MyXGBClassifier(XGBClassifier):
+    @property
+    def coef_(self):
+        return None
+
 #%% Todo
 
 # // TODO: Data intake: grab index performances, grab currencies, etc
-# TODO: log return transform all of the prices
-# TODO: Keep ARIMA but have it predict the log return
-# TODO: XGBoost to get feature importance, will need to prebuild the y_train y_test sets i think
-# TODO: Scaling: might need to use a differenct scaler, min max might not be the thing
-# TODO: Downselect only the useful features, don't need to keep everything
-# TODO: train on downselected features with shallow model
+# // TODO: log return transform all of the prices
+# // TODO: Keep ARIMA but have it predict the log return
+# ! 10 day, 9 year lookback w 0.5 arima did 67% match
+# // TODO: fix plotting
+# // TODO: double check the actual prediction vs. org data, just plot them both see if they align
+#  // TODO: XGBoost to get feature importance, will need to prebuild the y_train y_test sets i think
+#  // TODO: Scaling: might need to use a differenct scaler, min max might not be the thing
+#  // TODO: Downselect only the useful features, don't need to keep everything
+#  // TODO: train on downselected features with shallow model
+# TODO: probably need to just save the dataset, the dataprocessing is getting crazy lol
 # TODO: eval, predictions, etc
 # TODO: if satisfactory, grid search
 
@@ -48,9 +59,9 @@ Stock           = 'AAPL' #ticker
 SisterStock1    = 'MSFT'
 SisterStock2    = 'GOOGL'
 Predict         = 'Close_log'
-Lookback        = 4 # years
+Lookback        = 9 # years
 
-H               = 5 #forecast horizon in days
+H               = 10 #forecast horizon in days
 ARIMA_PreTrain  = 0.5 # pretrain ARIMA in years 
 ARIMA_Predict   = 'Close_log'
 
@@ -58,11 +69,11 @@ ARIMA_Predict   = 'Close_log'
 Plots = 'D:/StockAnalytics/ForecastXday'
 
 # model parms
-test_split  = 0.15 # train/test split
+test_split  = 0.25 # train/test split
 BatchSize   = 8 # number of samples to update weights
 TimeStep    = 20 # 2 months used in LSTM model
 Epoch       = 100 # number of times to run through the data
-Node        = 500 # number of LSTM Node
+Node        = 256 # number of LSTM Node
 
 #BatchSizes  = list(range(8, 32, 8))
 #TimeSteps  = list(range(20, 80, 20))
@@ -195,14 +206,108 @@ for i,row in data.iterrows():
     data.at[i,'day_month']  = row['Date'].day
     data.at[i,'day_week']   = row['Date'].weekday()
 
-print('Creating log return parms...')
-log_list = ['Open','Close','High','Low','Adj Close']
-for c in range(0,len(data.columns)):
-    if data.columns[c].split('_')[-1] in log_list:
-        data = log_return(data,data.columns[c]) 
+#Fouier Fast Transform of data
+data_FT = data[['Date', 'Close']]
+close_fft = np.fft.fft(np.asarray(data_FT['Close'].tolist()))
+fft_df = pd.DataFrame({'fft':close_fft})
+fft_df['absolute'] = fft_df['fft'].apply(lambda x: np.abs(x))
+fft_df['angle'] = fft_df['fft'].apply(lambda x: np.angle(x))
+plt.figure(figsize=(14, 7), dpi=100)
+fft_list = np.asarray(fft_df['fft'].tolist())
+for num_ in [3, 6, 10]:
+    fft_list_m10= np.copy(fft_list)
+    fft_list_m10[num_:-num_]=0
+    data['FFT' + str(num_) + '_Close'] = np.fft.ifft(fft_list_m10)
+    data['FFT' + str(num_) + '_Close'] = data['FFT' + str(num_) + '_Close'].apply(np.absolute)
+    plt.plot(np.fft.ifft(fft_list_m10), label='Fourier transform with {} components'.format(num_))
+plt.plot(data['Close'],  label='Real')
+plt.legend()
+plt.savefig(Plots + '/FFT.png')
+plt.close()
 
 print('Getting technical indicators...')
 data = get_technical_indicators(data,'Close')
+
+#%% XGBoost Feature Importance
+
+print('XGBOOST getting feature importance....')
+print('Predicting Horizon: ' + str(H) + ' days')
+
+boost_data = data.iloc[round(ARIMA_PreTrain*253):]
+
+remove_list = list()
+for c in range(0,len(boost_data.columns)):
+    if 'Date' in boost_data.columns[c]:
+        remove_list.append(boost_data.columns[c]) 
+boost_data = boost_data.drop(remove_list, axis=1)
+# delete first row or any rows with nans
+boost_data = boost_data.dropna()
+boost_data = boost_data.reset_index(drop=True)
+
+boost_target = boost_data.columns.get_loc('Close')
+
+#needs raw values it seems
+boosttrain, boosttest = train_test_split(boost_data, shuffle = False, test_size=test_split)
+
+# split data into x and y
+xgbtrain = boosttrain.iloc[:boosttrain.shape[0]-H+1]
+ygbtrain = boosttrain.iloc[H-1:][boosttrain.columns[boost_target]]
+
+xgbtest = boosttest.iloc[:boosttest.shape[0]-H+1]
+ygbtest = boosttest.iloc[H-1:][boosttest.columns[boost_target]]
+
+# fit model no training data
+model = MyXGBClassifier()
+model.fit(xgbtrain, ygbtrain)
+ygbguess = model.predict(xgbtest)
+
+importances     = model.feature_importances_
+features        = xgbtrain.columns.to_list()
+
+featuredf = pd.DataFrame()
+featuredf['Features'] = features
+featuredf['Importances'] = importances
+featuredf=featuredf.sort_values('Importances')
+
+thresholds = featuredf['Importances'].to_list()
+
+best_mae = 999
+for thresh in thresholds:
+    if thresh == 0:
+        continue
+    # select features using threshold
+    selection = SelectFromModel(model, threshold=thresh, prefit=True)
+    select_X_train = selection.transform(xgbtrain)
+    selected_fs=featuredf[featuredf['Importances'] >= thresh]['Features'].to_list()
+    print('Num of Features: ' + str(len(selected_fs)))
+    # train model
+    selection_model = XGBClassifier()
+    selection_model.fit(select_X_train, ygbtrain)
+    # eval model
+    select_X_test = selection.transform(xgbtest)
+    predictions = selection_model.predict(select_X_test)
+    xboost_mae = mean_absolute_error(ygbtest.values[:], np.array(predictions))
+    print('XBoost MAE: ' + str(xboost_mae))
+
+    if best_mae > xboost_mae:
+        best_mae        = xboost_mae
+        best_threshold  = thresh
+        best_features   = selected_fs
+
+print('XGBoost Complete')
+
+# grab only the important features
+data = data[best_features]
+
+#%% Continue Data Creation
+
+print('Creating log return parms...')
+log_list = ['Open','Close','High','Low','Adj Close',
+            'ma7','ma21','ma50','ma200','26ema','12ema',
+            'upper_band','lower_band','ema','momentum']
+for c in range(0,len(data.columns)):
+    if data.columns[c].split('_')[-1] in log_list:
+        data = log_return(data,data.columns[c]) 
 
 # delete first row or any rows with nans
 data = data.dropna()
@@ -240,37 +345,42 @@ print('ARIMA prediction completed.')
 data = data.dropna()
 data = data.reset_index(drop=True)
 
+# drop anything that is not important, no real prices or anything
+print('Dropping non-important parameters...')
+data.to_csv(Plots + '/rawdata.csv')
+raw_data = data['Close']
 
+keep_list = ['Volume','Range','month','day_month','day_week','log','MACD','20sd','ARIMA_Pred']
+remove_list = list()
+for c in range(0,len(data.columns)):
+    if data.columns[c].split('_')[-1] in keep_list:
+        continue
+    #drop column
+    remove_list.append(data.columns[c])
 
-
-
-
-
+data = data.drop(remove_list, axis=1)
+data.to_csv(Plots + '/data.csv')
 
 print('Dataset ready.')
 #%% Scaling/Splitting
 
 print('Splitting Data...')
-data_prep   = data.drop(['Day','Date'],axis=1)
-train, test = train_test_split(data_prep, shuffle = False, test_size=test_split)
+train, test = train_test_split(data, shuffle = False, test_size=test_split)
 
 target_var  = train.columns.get_loc(Predict)
 
 print('Scaling Data...')
-scaler = MinMaxScaler()
+#scaler = MinMaxScaler()
+scaler = StandardScaler()
 
-if ScaleAll:
-    train_scaled = scaler.partial_fit(train)
-    test_scaled  = scaler.partial_fit(test)
-    train_scaled = scaler.transform(train)
-    test_scaled  = scaler.transform(test)
-else:
-    train_scaled = scaler.fit_transform(train)
-    test_scaled  = scaler.transform(test)
+train_scaled = scaler.fit_transform(train)
+test_scaled  = scaler.transform(test)
 
-target_max = scaler.data_max_[target_var]
-target_min = scaler.data_min_[target_var]
+#target_max = scaler.data_max_[target_var]
+#target_min = scaler.data_min_[target_var]
 
+mean    = scaler.mean_[target_var]
+stdev   = scaler.scale_[target_var]
 
 #%% Create LSTM Sequences
 
@@ -303,9 +413,11 @@ print('Model Testing..')
 pred_closing      = model.predict(x_test)
 
 #unscale parms
-pred_closing      = pred_closing*(target_max - target_min) + target_min
-actual_closing    = y_test*(target_max - target_min) + target_min
-test_close        = test.iloc[TimeStep-1:-H]['Close'].values[:]
+#pred_closing      = pred_closing*(target_max - target_min) + target_min
+#actual_closing    = y_test*(target_max - target_min) + target_min
+pred_closing      = pred_closing*stdev + mean
+actual_closing    = y_test*stdev + mean
+test_close        = raw_data.iloc[len(train)+TimeStep-1:-H].values[:]
 
 x           = np.linspace(1,pred_closing.shape[1],pred_closing.shape[1])
 pred_trend  = np.zeros([pred_closing.shape[0],2])
@@ -375,16 +487,16 @@ act_trend_redux     = np.array(act_trend_redux)
 act_close_redux     = np.concatenate(act_close_redux)
 pred_close_redux    = np.concatenate(pred_close_redux)
 
-test_outcome = pd.DataFrame(columns=['PredSlope','PredTrend','TrueSlope','TrueTrend', 'Actual', 'Predicted'])
-test_outcome['PredSlope']   = pred_trend_redux[:,0]
-test_outcome['PredTrend']   = pred_trend_redux[:,1]
-test_outcome['TrueSlope']   = act_trend_redux[:,0]
-test_outcome['TrueTrend']   = act_trend_redux[:,1]
+trend_outcome = pd.DataFrame(columns=['PredSlope','PredTrend','TrueSlope','TrueTrend'])
+trend_outcome['PredSlope']   = pred_trend_redux[:,0]
+trend_outcome['PredTrend']   = pred_trend_redux[:,1]
+trend_outcome['TrueSlope']   = act_trend_redux[:,0]
+trend_outcome['TrueTrend']   = act_trend_redux[:,1]
 
-test_outcome['Match'] = np.nan
-test_outcome['Match'][test_outcome['TrueTrend'] == test_outcome['PredTrend']] = 1 
-test_outcome['Match'][test_outcome['TrueTrend'] != test_outcome['PredTrend']] = 0
-trend_match = test_outcome['Match'].sum()/test_outcome.shape[0]*100 
+trend_outcome['Match'] = np.nan
+trend_outcome['Match'][trend_outcome['TrueTrend'] == trend_outcome['PredTrend']] = 1 
+trend_outcome['Match'][trend_outcome['TrueTrend'] != trend_outcome['PredTrend']] = 0
+trend_match = trend_outcome['Match'].sum()/trend_outcome.shape[0]*100 
 
 mape = mean_absolute_percentage_error(act_close_redux,pred_close_redux)
 mae  = mean_absolute_error(act_close_redux,pred_close_redux)
@@ -393,8 +505,13 @@ print('MAPE: ' + str(mape))
 print('MAE: ' + str(mae))
 print('Prediction Matches: ' + str(trend_match))
 
-fname = Plots + '/test_outcome.csv'
-test_outcome.to_csv(fname)
+test_outcome = pd.DataFrame(columns=['Actual','Sanity Check','Predicted'])
+test_outcome['Actual']          = act_close_redux
+test_outcome['Sanity Check']    = raw_data.iloc[len(train)+TimeStep:-H+1].values[:]
+test_outcome['Predicted']       = pred_close_redux
+
+fname = Plots + '/tred_outcome.csv'
+trend_outcome.to_csv(fname)
 print('Saving Test Output: ' + fname)
 
 #%% Results
@@ -403,21 +520,33 @@ print('Saving Test Output: ' + fname)
 MasterDF    = pd.DataFrame(columns=['Closing Price','Actual/Predicted','Test/Train'])
 
 #grab actual test
-tempdf = pd.DataFrame({'Closing Price':act_close_redux,'Actual/Predicted':'Actual','Test/Train':'Test'})
-MasterDF = MasterDF.append(tempdf)
+actualtestdf = pd.DataFrame({'Closing Price':act_close_redux,'Actual/Predicted':'Actual','Test/Train':'Test'})
+MasterDF = MasterDF.append(actualtestdf)
 
 #grab pred test
-tempdf = pd.DataFrame({'Closing Price':pred_close_redux,'Actual/Predicted':'Predicted','Test/Train':'Test'})
-MasterDF = MasterDF.append(tempdf)
+predtestdf = pd.DataFrame({'Closing Price':pred_close_redux,'Actual/Predicted':'Predicted','Test/Train':'Test'})
+MasterDF = MasterDF.append(predtestdf)
 
 #create index column to use as x axis for plot
-#MasterDF = MasterDF.reset_index(drop=True)
-MasterDF = MasterDF.reset_index(drop=False)
+actualtestdf    = actualtestdf.reset_index(drop=False)
+predtestdf      = predtestdf.reset_index(drop=False)
+MasterDF        = MasterDF.reset_index(drop=False)
 
 print('Plotting...')
-palette = sns.color_palette("mako_r", 2)
 fig = plt.figure(figsize=(19.20,10.80))
-sns.relplot(x='index', y='Closing Price', hue="Actual/Predicted", palette=palette, estimator=None, kind="line", data=MasterDF)
+
+ax = fig.add_subplot(111)
+ax.plot(actualtestdf['index'].values[:],actualtestdf['Closing Price'].values[:], color='lightblue', linewidth=3)
+ax.plot(actualtestdf['index'].values[:],test_outcome['Sanity Check'].values[:], color='black', linewidth=1)
+for r in range(0,predtestdf.shape[0]):
+    if not r:
+        #grab first row
+        prev_r = r
+    
+    elif (r == prev_r + H) :
+        ax.plot(predtestdf['index'][prev_r:r].values[:],predtestdf['Closing Price'][prev_r:r].values[:], color='darkgreen', linewidth=3)
+        prev_r = r
+
 fname = Plots + '/' + Stock + '_LSTM_B'+ str(BatchSize) + '_T' + str(TimeStep) + '_N' + str(Node) + '_M' + str(trend_match) + '_MAE' + str(mae)[:-12] + '_MAPE' + str(mape)[:-11] + '.svg'
 plt.savefig(fname)
 plt.close()
