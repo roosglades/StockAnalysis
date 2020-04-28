@@ -38,7 +38,9 @@ class MyXGBClassifier(XGBClassifier):
 
 #%% functions
 
-def DataExtract(SaveData,Stock,Horizon,SisterStock1,SisterStock2,ARIMA_Predict,ARIMA_PreTrain,Lookback,current,selected_date,test_split):
+def DataExtract(SaveData,Stock,Horizon,SisterStock1,
+                SisterStock2,ARIMA_Predict,ARIMA_PreTrain,
+                Lookback,current,selected_date,test_split,fdetail):
     #%% Pre
     if not os.path.exists(SaveData):
         os.makedirs(SaveData)
@@ -274,7 +276,7 @@ def DataExtract(SaveData,Stock,Horizon,SisterStock1,SisterStock2,ARIMA_Predict,A
 
     best_mae = 999
     for thresh in thresholds:
-        if thresh == 0:
+        if (thresh == 0):
             continue
         # select features using threshold
         selection = SelectFromModel(model, threshold=thresh, prefit=True)
@@ -293,6 +295,9 @@ def DataExtract(SaveData,Stock,Horizon,SisterStock1,SisterStock2,ARIMA_Predict,A
         if best_mae > xboost_mae:
             best_mae        = xboost_mae
             best_features   = selected_fs
+            
+            if fdetail:
+                break 
 
     print('XGBoost Complete')
 
