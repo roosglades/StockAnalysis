@@ -44,7 +44,8 @@ Stock           = 'AAPL'    # target stock
 Horizon         = 10        # forecast horizon in days
 SisterStock1    = 'MSFT'    # familiar stock to target stock
 SisterStock2    = 'GOOGL'   # familiar stock to target stock
-ExtractData     = True     # Do we need to extract data?
+ExtractData     = True      # Do we need to extract data?
+TrainModel      = True      # Do we need to train a model?
 current         = True      # Use today's date as prediction date
 
 # if current=False
@@ -61,11 +62,11 @@ ARIMA_PreTrain  = 0.5 # pretrain ARIMA in years
 ARIMA_Predict   = 'Close'
 
 test_split  = 0.20 # train/test split
-Epoch       = 10 # number of times to run through the data
+Epoch       = 80 # number of times to run through the data
 
-BatchSizes  = list(range(8, 40, 8))
+BatchSizes  = list(range(8, 32, 8))
 TimeSteps   = list(range(20, 80, 20))
-Nodes       = list(range(96,480,64))
+Nodes       = list(range(96,416,64))
 
 #%% Data Prep
 
@@ -114,37 +115,39 @@ stdev   = scaler.scale_[target_var]
 
 #%% Create LSTM Sequences
 
-#grid search
-prev_match = 0
-for b in range(0,len(BatchSizes)):
-    BatchSize = BatchSizes[b]
-    for j in range(0,len(TimeSteps)):
-        TimeStep = TimeSteps[j]
-        for m in range(0,len(Nodes)):
-            Node = Nodes[m]
+if TrainModel:
+    #grid search
+    prev_match = 0
+    for b in range(0,len(BatchSizes)):
+        BatchSize = BatchSizes[b]
+        for j in range(0,len(TimeSteps)):
+            TimeStep = TimeSteps[j]
+            for m in range(0,len(Nodes)):
+                Node = Nodes[m]
 
-            trend_match, model, XPredict    = TrainEvalModel(Stock,SaveData,train_scaled, test_scaled, target_var,
-                                                Horizon, BatchSize, TimeStep, Node, Epoch,
-                                                raw_data, stdev, mean)
+                trend_match, model, NextPredict    = TrainEvalModel(Stock,SaveData,train_scaled, test_scaled, target_var,
+                                                    Horizon, BatchSize, TimeStep, Node, Epoch,
+                                                    raw_data, stdev, mean)
 
-            folder  = SaveData + '/Models/'
-            if not os.path.exists(folder):
-                os.makedirs(folder)
+                folder  = SaveData + '/Models/'
+                if not os.path.exists(folder):
+                    os.makedirs(folder)
 
-            if trend_match > prev_match:
-                # Save model file
-                model.save(folder + Stock + '_model.h5')
-                # Save trend_match
-                best_trend = trend_match
-                # Save XPredict
-                NextPredict = XPredict
-                prev_match = trend_match
+                if trend_match > prev_match:
+                    # Save model file
+                    model.save(folder + Stock + '_model.h5')
+                    # Save trend_match
+                    best_trend = trend_match
+                    # Save XPredict
+                    np.save(folder + Stock + '_Xdata.npy',NextPredict)
+                    prev_match = trend_match
 
 # Load Best Model
-model = load_model(folder + Stock + '_model.h5')
+model       = load_model(folder + Stock + '_model.h5')
+XPredict    = np.load(folder + Stock + '_Xdata.npy')
 
 # Predict X
-YPredict    = model.predict(NextPredict)
+YPredict    = model.predict(XPredict)
 YPredict    = np.concatenate(YPredict*stdev + mean) # un-scale the data
 
 last_val = raw_data.values[-1]
