@@ -44,6 +44,10 @@ def DataExtract(SaveData,Stock,Horizon,SisterStock1,
     #%% Pre
     if not os.path.exists(SaveData):
         os.makedirs(SaveData)
+    
+    folder  = SaveData + '/Data/'
+    if not os.path.exists(folder):
+        os.makedirs(folder)
 
     #%% Creating Dataset
     print('Grabbing Stock Market Data...')
@@ -178,7 +182,7 @@ def DataExtract(SaveData,Stock,Horizon,SisterStock1,
         plt.plot(np.fft.ifft(fft_list_m10), label='Fourier transform with {} components'.format(num_))
     plt.plot(data['Close'],  label='Real')
     plt.legend()
-    plt.savefig(SaveData + '/FFT.png')
+    plt.savefig(folder + 'FFT.png')
     plt.close()
 
     print('Getting technical indicators...')
@@ -237,6 +241,7 @@ def DataExtract(SaveData,Stock,Horizon,SisterStock1,
     print('XGBOOST getting feature importance....')
     print('Predicting Horizon: ' + str(Horizon) + ' days')
 
+    data.to_csv(folder + Stock + 'RawData.csv')
     boost_data = data
 
     remove_list = list()
@@ -322,7 +327,7 @@ def DataExtract(SaveData,Stock,Horizon,SisterStock1,
 
     data = data.dropna()
     data = data.reset_index(drop=True)
-    data.to_csv(SaveData + '/' + Stock + 'data.csv')
+    data.to_csv(folder + Stock + 'data.csv')
     print('Dataset ready.')
 
 # Accuracy metrics
@@ -341,6 +346,167 @@ def forecast_accuracy(forecast, actual):
     return({'mape':mape, 'me':me, 'mae': mae, 
             'mpe': mpe, 'rmse':rmse,
             'corr':corr, 'minmax':minmax})
+
+def TrainEvalModel(Stock,SaveData,Train,Test,TargetVar,Horizon,BatchSize,TimeStep,Node,Epoch,raw_data,stdev,mean):
+
+    print('Creating Sequences...')
+    x_train, y_train    = CreateDataSequences(TimeStep, Train, Horizon, TargetVar)
+    x_test, y_test      = CreateDataSequences(TimeStep, Test, Horizon, TargetVar)
+    XPredict            = CreateDataSequence(TimeStep,Test)
+
+    #%% Model
+    model = ShallowLSTM(Node,TimeStep,x_train.shape[2],y_train.shape[1])
+
+    print('Fitting Model..')
+    model.fit(x_train, y_train, epochs=Epoch, batch_size=BatchSize, verbose=2,
+                callbacks=[EarlyStopping(monitor='val_loss', patience=2, verbose=0, mode='auto',
+                restore_best_weights=True)])
+
+    #%% Model Eval
+    print('Model Testing..')
+    #test set
+    pred_closing      = model.predict(x_test)
+
+    #unscale parms
+    pred_closing      = pred_closing*stdev + mean
+    actual_closing    = y_test*stdev + mean
+    test_close        = raw_data.iloc[len(Train)+TimeStep-1:-Horizon].values[:]
+
+    x           = np.linspace(1,pred_closing.shape[1],pred_closing.shape[1])
+    pred_trend  = np.zeros([pred_closing.shape[0],2])
+    act_trend   = np.zeros([actual_closing.shape[0],2])
+    for t in range(0,len(test_close)):
+        current_val = test_close[t]
+        for t_plus in range(0,pred_closing.shape[1]):
+
+            pred_val    = pred_closing[t,t_plus]
+            act_val     = actual_closing[t,t_plus]
+
+            if not t_plus:
+                # first point we need to use the current val
+                pred_val    = np.e**pred_val*current_val
+                act_val     = np.e**act_val*current_val
+            else:
+                # after first point we need to propogate the previous converted point
+                prev_pred = pred_closing[t,t_plus-1]
+                prev_act  = actual_closing[t,t_plus-1]
+
+                pred_val    = np.e**pred_val*prev_pred
+                act_val     = np.e**act_val*prev_act
+
+            pred_closing[t,t_plus]      = pred_val
+            actual_closing[t,t_plus]    = act_val
+
+        #grabbing overall forecast trend
+        pred_trend[t,0] = linregress(x, pred_closing[t]).slope
+        if pred_trend[t,0] > 0:
+            pred_trend[t,1] = 1
+        elif pred_trend[t,0] <= 0:
+            pred_trend[t,1] = 0
+        
+        act_trend[t,0]  = linregress(x, actual_closing[t]).slope
+        if act_trend[t,0] > 0:
+            act_trend[t,1] = 1
+        elif act_trend[t,0] <= 0:
+            act_trend[t,1] = 0
+
+    act_close_redux, pred_close_redux = list(), list()
+    act_trend_redux, pred_trend_redux = list(), list()
+    for r in range(0,len(actual_closing)):
+        
+        if not r:
+            # first row
+            act_close_redux.append(actual_closing[r])
+            pred_close_redux.append(pred_closing[r])
+
+            act_trend_redux.append(act_trend[r])
+            pred_trend_redux.append(pred_trend[r])
+            
+            prev_r = r
+        
+        elif r == prev_r + Horizon :
+
+            act_close_redux.append(actual_closing[r])
+            pred_close_redux.append(pred_closing[r])
+
+            act_trend_redux.append(act_trend[r])
+            pred_trend_redux.append(pred_trend[r])
+
+            prev_r = r
+
+    pred_trend_redux    = np.array(pred_trend_redux)
+    act_trend_redux     = np.array(act_trend_redux)
+    act_close_redux     = np.concatenate(act_close_redux)
+    pred_close_redux    = np.concatenate(pred_close_redux)
+
+    trend_outcome = pd.DataFrame(columns=['PredSlope','PredTrend','TrueSlope','TrueTrend'])
+    trend_outcome['PredSlope']   = pred_trend_redux[:,0]
+    trend_outcome['PredTrend']   = pred_trend_redux[:,1]
+    trend_outcome['TrueSlope']   = act_trend_redux[:,0]
+    trend_outcome['TrueTrend']   = act_trend_redux[:,1]
+
+    trend_outcome['Match'] = np.nan
+    trend_outcome['Match'][trend_outcome['TrueTrend'] == trend_outcome['PredTrend']] = 1 
+    trend_outcome['Match'][trend_outcome['TrueTrend'] != trend_outcome['PredTrend']] = 0
+    trend_match = trend_outcome['Match'].sum()/trend_outcome.shape[0]*100 
+
+    mape = mean_absolute_percentage_error(act_close_redux,pred_close_redux)
+    mae  = mean_absolute_error(act_close_redux,pred_close_redux)
+
+    print('MAPE: ' + str(mape))
+    print('MAE: ' + str(mae))
+    print('Prediction Matches: ' + str(trend_match))
+
+    test_outcome = pd.DataFrame(columns=['Actual','Sanity Check','Predicted'])
+    test_outcome['Actual']          = act_close_redux
+    test_outcome['Predicted']       = pred_close_redux
+
+    fname   = 'tred_outcome.csv'
+    folder  = SaveData + '/Plots/'
+    if not os.path.exists(folder):
+        os.makedirs(folder)
+    trend_outcome.to_csv(folder + fname)
+    print('Saving Test Output: ' + fname)
+
+    #%% Results
+
+    #combine datasets
+    MasterDF    = pd.DataFrame(columns=['Closing Price','Actual/Predicted','Test/Train'])
+
+    #grab actual test
+    actualtestdf = pd.DataFrame({'Closing Price':act_close_redux,'Actual/Predicted':'Actual','Test/Train':'Test'})
+    MasterDF = MasterDF.append(actualtestdf)
+
+    #grab pred test
+    predtestdf = pd.DataFrame({'Closing Price':pred_close_redux,'Actual/Predicted':'Predicted','Test/Train':'Test'})
+    MasterDF = MasterDF.append(predtestdf)
+
+    #create index column to use as x axis for plot
+    actualtestdf    = actualtestdf.reset_index(drop=False)
+    predtestdf      = predtestdf.reset_index(drop=False)
+    MasterDF        = MasterDF.reset_index(drop=False)
+
+    print('Plotting...')
+    fig = plt.figure(figsize=(19.20,10.80))
+
+    ax = fig.add_subplot(111)
+    ax.plot(actualtestdf['index'].values[:],actualtestdf['Closing Price'].values[:], color='lightblue', linewidth=3)
+    for r in range(0,predtestdf.shape[0]):
+        if not r:
+            #grab first row
+            prev_r = r
+        
+        elif (r == prev_r + Horizon) :
+            ax.plot(predtestdf['index'][prev_r:r].values[:],predtestdf['Closing Price'][prev_r:r].values[:], color='darkgreen', linewidth=3)
+            prev_r = r
+
+    fname = SaveData + '/Plots/' + Stock + '_LSTM_B'+ str(BatchSize) + '_T' + str(TimeStep) + '_N' + str(Node) + '_M' + str(trend_match) + '_MAE' + str(mae)[:-12] + '_MAPE' + str(mape)[:-11] + '.svg'
+    plt.savefig(fname)
+    plt.close()
+    print('Saved Plot: ' + fname)
+
+    return trend_match, model, XPredict
+
 
 #gets the trend match for a pandas dataframe with predicted true and current price columns
 def get_trend_match(dataset, current_col, true_col, predicted_col):
@@ -435,6 +601,16 @@ def CreateDataSequences(TimeStep,data,Horizon,target_variable):
     x_new, y_new = np.array(x_new), np.array(y_new)
 
     return x_new, y_new
+
+def CreateDataSequence(TimeStep,data):
+    x_new = []
+    for i in range(TimeStep,len(data)):
+        x_new.append(data[i-TimeStep:i,:])
+    #grab last point
+    x_new = np.array(x_new[-2:-1])
+    return x_new
+
+
 
 # def create_generator():
 #     generator = Sequential()
