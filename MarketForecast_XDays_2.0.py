@@ -34,11 +34,6 @@ warnings.filterwarnings("ignore")
 
 from functions import *
 
-#%% Todo
-
-#! next model
-# TODO: lets look at PCA to reduce the dimensionality
-
 #%% User Input
 Stock           = 'AAPL'    # target stock
 Horizon         = 10        # forecast horizon in days
@@ -64,9 +59,9 @@ ARIMA_Predict   = 'Close'
 test_split  = 0.20 # train/test split
 Epoch       = 80 # number of times to run through the data
 
-BatchSizes  = list(range(8, 32, 8))
-TimeSteps   = list(range(20, 80, 20))
-Nodes       = list(range(96,416,64))
+BatchSizes  = [8,16]
+TimeSteps   = [20,40,60]
+Nodes       = [160,256,384,448]
 
 #%% Data Prep
 
