@@ -63,6 +63,9 @@ BatchSizes  = [8,16]
 TimeSteps   = [20,40,60]
 Nodes       = [160,256,384,448]
 
+#%% Pre
+folder = SaveData + '/Models/'
+
 #%% Data Prep
 
 if ExtractData:
@@ -178,7 +181,7 @@ ax2.plot(raw_data['index'].values[-60:],raw_data['Close'].values[-60:], color='b
 ax2.plot(YPredictdf['index'].values[:],YPredictdf['Predicted'].values[:], color='green', linewidth=3)
 
 
-fname = SaveData + '/Plots/' + 'Predict_' + str(Horizon) +'Days_'+ Stock + '_M' + str(best_trend) + '.svg'
+fname = SaveData + '/Plots/' + 'Predict_' + str(Horizon) +'Days_'+ Stock + '.svg'
 plt.savefig(fname)
 plt.close()
 print('Saved Plot: ' + fname)
