@@ -1,3 +1,8 @@
 
 test.csv
 *.csv
+__pycache__/functions.cpython-37.pyc
+*.pyc
+*.pyc
+__pycache__/functions.cpython-37.pyc
+*.pyc

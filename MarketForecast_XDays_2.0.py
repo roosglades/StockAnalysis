@@ -52,11 +52,11 @@ SaveData = 'D:/StockAnalytics/ForecastXDay'
 #%% Model HyperParms
 
 Predict         = 'Close_log'
-Lookback        = 9 # years to grab data
+Lookback        = 8.5 # years to grab data
 ARIMA_PreTrain  = 0.5 # pretrain ARIMA in years 
 ARIMA_Predict   = 'Close'
 
-test_split  = 0.20 # train/test split
+test_split  = 0.15 # train/test split
 Epoch       = 80 # number of times to run through the data
 
 BatchSizes  = [8,16]
@@ -64,7 +64,21 @@ TimeSteps   = [20,40,60]
 Nodes       = [160,256,384,448]
 
 #%% Pre
+
+if not os.path.exists(SaveData):
+    os.makedirs(SaveData)
+
+folder  = SaveData + '/Data/'
+if not os.path.exists(folder):
+    os.makedirs(folder)
+
+folder = SaveData + '/Plots/'
+if not os.path.exists(folder):
+    os.makedirs(folder)
+
 folder = SaveData + '/Models/'
+if not os.path.exists(folder):
+    os.makedirs(folder)
 
 #%% Data Prep
 
@@ -181,7 +195,7 @@ ax2.plot(raw_data['index'].values[-60:],raw_data['Close'].values[-60:], color='b
 ax2.plot(YPredictdf['index'].values[:],YPredictdf['Predicted'].values[:], color='green', linewidth=3)
 
 
-fname = SaveData + '/Plots/' + 'Predict_' + str(Horizon) +'Days_'+ Stock + '.svg'
+fname = SaveData + '/Models/' + 'Predict_' + str(Horizon) +'Days_'+ Stock + '.svg'
 plt.savefig(fname)
 plt.close()
 print('Saved Plot: ' + fname)

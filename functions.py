@@ -41,13 +41,9 @@ class MyXGBClassifier(XGBClassifier):
 def DataExtract(SaveData,Stock,Horizon,SisterStock1,
                 SisterStock2,ARIMA_Predict,ARIMA_PreTrain,
                 Lookback,current,selected_date,test_split,fdetail):
-    #%% Pre
-    if not os.path.exists(SaveData):
-        os.makedirs(SaveData)
     
+    #%% Pre
     folder  = SaveData + '/Data/'
-    if not os.path.exists(folder):
-        os.makedirs(folder)
 
     #%% Creating Dataset
     print('Grabbing Stock Market Data...')
@@ -106,7 +102,7 @@ def DataExtract(SaveData,Stock,Horizon,SisterStock1,
     comp3data = comp3data.add_prefix('comp3_')
 
     # ishares tracking chinese market
-    comp4data = yf.download('ashr', start=arima_start, end=date_select)
+    comp4data = yf.download('gxc', start=arima_start, end=date_select)
     comp4data = comp4data.reset_index()
     comp4data = comp4data.astype({'Volume': 'float64'}) # change datatype to float
     comp4data['Range'] = comp4data['High'] - comp4data['Low']
@@ -187,6 +183,9 @@ def DataExtract(SaveData,Stock,Horizon,SisterStock1,
 
     print('Getting technical indicators...')
     data = get_technical_indicators(data,'Close')
+
+    data = data.dropna()
+    data = data.reset_index(drop=True)
 
     #%% ARIMA
 
@@ -463,8 +462,6 @@ def TrainEvalModel(Stock,SaveData,Train,Test,TargetVar,Horizon,BatchSize,TimeSte
 
     fname   = 'trend_outcome.csv'
     folder  = SaveData + '/Data/'
-    if not os.path.exists(folder):
-        os.makedirs(folder)
     trend_outcome.to_csv(folder + fname)
     print('Saving Test Output: ' + fname)
 
