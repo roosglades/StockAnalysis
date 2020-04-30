@@ -461,8 +461,8 @@ def TrainEvalModel(Stock,SaveData,Train,Test,TargetVar,Horizon,BatchSize,TimeSte
     test_outcome['Actual']          = act_close_redux
     test_outcome['Predicted']       = pred_close_redux
 
-    fname   = 'tred_outcome.csv'
-    folder  = SaveData + '/Plots/'
+    fname   = 'trend_outcome.csv'
+    folder  = SaveData + '/Data/'
     if not os.path.exists(folder):
         os.makedirs(folder)
     trend_outcome.to_csv(folder + fname)
