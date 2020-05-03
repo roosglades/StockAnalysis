@@ -35,10 +35,10 @@ warnings.filterwarnings("ignore")
 from functions import *
 
 #%% User Input
-Stock           = 'AAPL'    # target stock
+Stock           = 'BAC'    # target stock
 Horizon         = 10        # forecast horizon in days
-SisterStock1    = 'MSFT'    # familiar stock to target stock
-SisterStock2    = 'GOOGL'   # familiar stock to target stock
+SisterStock1    = 'JPM'    # familiar stock to target stock
+SisterStock2    = 'WFC'   # familiar stock to target stock
 ExtractData     = True      # Do we need to extract data?
 TrainModel      = True      # Do we need to train a model?
 current         = True      # Use today's date as prediction date
@@ -47,7 +47,7 @@ current         = True      # Use today's date as prediction date
 selected_date = '2020-01-01'
 
 # Folder for plots & data
-SaveData = 'D:/StockAnalytics/ForecastXDay'
+SaveData = 'D:/StockAnalytics/BAC'
 
 #%% Model HyperParms
 
