@@ -575,7 +575,6 @@ def ShallowLSTM(HiddenNodes,TimeStep,input_size,output_size):
     model.add(Dense(output_size,activation='linear'))
     model.compile(loss='mean_absolute_error', optimizer='adam')
     return model
-    #M42.22222222222222_C0.9915_MAE2.674_MAPE1.10933
 
 def ShallowLSTM_proto(HiddenNodes,TimeStep,input_size,output_size):
     model = Sequential()
