@@ -12,7 +12,7 @@ Leverage machine learning to provide a forecast for any given stock (on the NYSE
 
 Utilize a LSTM (Long Short Term Memory) RNN (Recurrent Neural Network) that can weight previous time sequenced inputs from the economic history and train on these hidden patterns. We will use 8 1/2 years worth of stock and global economic data to train/test the neural network's performance. 
 
-Our performance will be measured using a MAE, MAPE. My main criteria will be how often the trend for the forecasted days matches the actual data. 
+Our performance will be measured using MAE, MAPE. However, my main criteria will be how often the trend for the forecasted days matches the actual data. 
 
 ## Data:
 The data will be gathered from the following sources using mostly yahoo finance throught the yfinance python library.
