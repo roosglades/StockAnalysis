@@ -26,6 +26,19 @@ The data will be gathered from the following sources using mostly yahoo finance 
 - 12 Technical Indicators: ma200, ma50, MACD etc.
 - Seasonal ARIMA (AutoRegressive Integrated Moving Average) which is often used in time series prediction. We will predict closing price 
 
+## Model:
+
+<img width="691" alt="lstm" src="https://user-images.githubusercontent.com/43393452/80933635-8edfe180-8d92-11ea-8928-7cd9a632d197.PNG">
+
+- Single LSTM layer
+- Recurrent dropout to prevent overfitting
+- Activation Function: ReLU (Rectified Linear Unit) 
+- Loss: MAE (Mean Absolute Error)
+- Optimizer: ADAM (Adaptive Moment Estimation)
+- Node Size: Found during grid search
+- Batch Size: Found during grid search
+- Time Step: Found during grid search
+
 ## Analysis Flow:
 
 1) Injest Data - 104 parameters in total
@@ -40,11 +53,9 @@ The data will be gathered from the following sources using mostly yahoo finance 
 10) Perform horizon prediction for X number of days for selected stock
 11) Output on macro and micro scale
 
-
 ## User Input:
 
 <img width="397" alt="useri" src="https://user-images.githubusercontent.com/43393452/80933432-ba160100-8d91-11ea-8ee0-3875fac5d2a6.PNG">
-
 
 ## Required Libraries:
 
